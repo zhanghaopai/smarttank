@@ -1,0 +1,4 @@
+/.deps/
+/build/
+/CMakeUserPresets.json
+/aqtinstall.log

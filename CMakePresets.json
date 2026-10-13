@@ -1,0 +1,42 @@
+{
+  "version": 6,
+  "configurePresets": [
+    {
+      "name": "windows-msvc",
+      "displayName": "Windows MSVC / Qt Widgets / OCCT",
+      "generator": "Visual Studio 17 2022",
+      "architecture": "x64",
+      "binaryDir": "${sourceDir}/build/windows-msvc",
+      "cacheVariables": {
+        "CMAKE_PREFIX_PATH": "${sourceDir}/.deps/Qt/6.8.3/msvc2022_64;${sourceDir}/.deps/vcpkg/installed/x64-windows",
+        "BUILD_TESTING": "ON"
+      }
+    },
+    {
+      "name": "windows-preview",
+      "inherits": "windows-msvc",
+      "displayName": "Preview build in a separate directory",
+      "binaryDir": "${sourceDir}/build/windows-preview"
+    }
+  ],
+  "buildPresets": [
+    { "name": "release", "configurePreset": "windows-msvc", "configuration": "Release" },
+    { "name": "preview", "configurePreset": "windows-preview", "configuration": "Release" }
+  ],
+  "testPresets": [
+    {
+      "name": "release",
+      "configurePreset": "windows-msvc",
+      "configuration": "Release",
+      "environment": {
+        "PATH": "${sourceDir}/.deps/Qt/6.8.3/msvc2022_64/bin;${sourceDir}/.deps/vcpkg/installed/x64-windows/bin;$penv{PATH}"
+      },
+      "output": { "outputOnFailure": true }
+    },
+    {
+      "name": "preview",
+      "inherits": "release",
+      "configurePreset": "windows-preview"
+    }
+  ]
+}
