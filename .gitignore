@@ -5,3 +5,4 @@
 /.codex/
 /CMakeUserPresets.json
 /aqtinstall.log
+.DS_Store
