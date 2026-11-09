@@ -3,12 +3,14 @@
 #include <QPoint>
 #include <QString>
 #include <QImage>
+#include <QPointer>
 #include <AIS_InteractiveContext.hxx>
 #include <AIS_Shape.hxx>
 #include <V3d_View.hxx>
 #include <map>
 #include "core/Project.h"
 #include "geometry/EnvelopeGeometry.h"
+class QWindow;
 
 namespace smarttank {
 class OcctView : public QWidget {
@@ -25,7 +27,7 @@ public:
     void rotate(double horizontalRadians, double verticalRadians);
     void zoom(double factor);
     void highlightPart(Part part);
-    std::size_t displayedPlateCount() const { return initialized() && !envelope_ ? pending_.size() : 0; }
+    std::size_t displayedPlateCount() const { return initialized() && !displayingEnvelope_ ? objects_.size() : 0; }
     std::size_t displayedComponentCount() const;
     void setProjection(V3d_TypeOfOrientation orientation);
     void setPartVisible(Part part, bool visible);
@@ -36,6 +38,7 @@ signals:
     void renderingFailed(const QString& reason);
 
 protected:
+    bool eventFilter(QObject* watched, QEvent* event) override;
     QPaintEngine* paintEngine() const override;
     void showEvent(QShowEvent* event) override;
     void paintEvent(QPaintEvent* event) override;
@@ -51,17 +54,19 @@ private:
     };
 
     void initialize();
+    void releaseViewer();
     void handleInitializationFailure(const QString& reason);
     void synchronizeViewport();
     void displayPending();
+    void replaceObjects(std::map<std::string, DisplayedObject> replacements, bool envelope);
     bool native_;
     QString failure_;
+    QPointer<QWindow> surfaceWindow_;
     occ::handle<V3d_View> view_;
     occ::handle<AIS_InteractiveContext> context_;
     std::map<std::string, DisplayedObject> objects_;
-    std::vector<Plate> pending_;
-    std::optional<EnvelopeDimensions> envelope_;
-    std::optional<Part> selectedPart_;
+    bool displayingEnvelope_ = false;
+    std::optional<Part> selectedPart_ = std::nullopt;
     std::array<bool, 3> partVisible_{{true, true, true}};
 };
 }

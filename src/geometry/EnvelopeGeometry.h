@@ -9,7 +9,7 @@ namespace smarttank {
 struct EnvelopeDimensions {
     double radiusMm;
     double wallHeightMm;
-    std::optional<double> roofRiseMm;
+    std::optional<double> roofRiseMm = std::nullopt;
 };
 struct ComponentShape {
     Part part;

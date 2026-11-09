@@ -6,6 +6,8 @@
 #include <QPainter>
 #include <QShowEvent>
 #include <QResizeEvent>
+#include <QWindow>
+#include <QPlatformSurfaceEvent>
 #include <Aspect_DisplayConnection.hxx>
 #include <OpenGl_GraphicDriver.hxx>
 #include <V3d_Viewer.hxx>
@@ -41,11 +43,26 @@ OcctView::OcctView(QWidget* parent)
     }
 }
 OcctView::~OcctView() {
+    if (surfaceWindow_) surfaceWindow_->removeEventFilter(this);
+    releaseViewer();
+}
+
+void OcctView::releaseViewer() {
     if (!context_.IsNull()) context_->RemoveAll(false);
-    objects_.clear();
     context_.Nullify();
     if (!view_.IsNull()) view_->Remove();
     view_.Nullify();
+}
+
+bool OcctView::eventFilter(QObject* watched, QEvent* event) {
+    if (watched == surfaceWindow_ && event->type() == QEvent::PlatformSurface) {
+        const auto* surfaceEvent = static_cast<QPlatformSurfaceEvent*>(event);
+        if (surfaceEvent->surfaceEventType() == QPlatformSurfaceEvent::SurfaceAboutToBeDestroyed) {
+            // Release OpenGL resources while the native drawable still exists.
+            releaseViewer();
+        }
+    }
+    return QWidget::eventFilter(watched, event);
 }
 
 QPaintEngine* OcctView::paintEngine() const {
@@ -53,6 +70,10 @@ QPaintEngine* OcctView::paintEngine() const {
 }
 
 void OcctView::initialize() {
+    const auto nativeHandle = winId();
+    if (surfaceWindow_) surfaceWindow_->removeEventFilter(this);
+    surfaceWindow_ = windowHandle();
+    surfaceWindow_->installEventFilter(this);
     occ::handle<Aspect_DisplayConnection> display = new Aspect_DisplayConnection();
     occ::handle<OpenGl_GraphicDriver> driver = new OpenGl_GraphicDriver(display);
     occ::handle<V3d_Viewer> viewer = new V3d_Viewer(driver);
@@ -66,7 +87,7 @@ void OcctView::initialize() {
     view_->ChangeRenderingParams().NbMsaaSamples = 4;
     // Qt owns the HWND and its geometry; OCCT needs physical pixel dimensions.
     occ::handle<Aspect_NeutralWindow> window = new Aspect_NeutralWindow();
-    window->SetNativeHandle(reinterpret_cast<Aspect_Drawable>(winId()));
+    window->SetNativeHandle(reinterpret_cast<Aspect_Drawable>(nativeHandle));
     window->SetSize(qRound(width() * devicePixelRatioF()), qRound(height() * devicePixelRatioF()));
     view_->SetWindow(window);
     view_->SetBackgroundColor(Quantity_Color(0.12, 0.15, 0.19, Quantity_TOC_RGB));
@@ -90,9 +111,7 @@ void OcctView::showEvent(QShowEvent* event) {
 
 void OcctView::handleInitializationFailure(const QString& reason) {
     failure_ = reason;
-    if (!view_.IsNull()) view_->Remove();
-    view_.Nullify();
-    context_.Nullify();
+    releaseViewer();
     emit renderingFailed(failure_);
 }
 
@@ -128,45 +147,44 @@ void OcctView::synchronizeViewport() {
 }
 
 void OcctView::showPlates(const std::vector<Plate>& plates) {
-    // Validate the complete replacement before changing the current presentation.
-    std::map<std::string, occ::handle<AIS_Shape>> replacements;
+    // Build and validate the entire replacement before changing display state.
+    std::map<std::string, DisplayedObject> replacements;
     for (const auto& plate : plates) {
-        if (plate.id.empty() || replacements.count(plate.id))
+        if (plate.id.empty() || replacements.count(plate.id)) {
             throw std::invalid_argument("Display plate IDs must be unique and nonempty");
-        replacements.emplace(plate.id, new AIS_Shape(makeInstalledShape(plate.installed)));
+        }
+        if (static_cast<std::size_t>(plate.part) >= partVisible_.size()) {
+            throw std::invalid_argument("Unsupported tank part");
+        }
+        auto presentation = occ::handle<AIS_Shape>(new AIS_Shape(makeInstalledShape(plate.installed)));
+        presentation->Attributes()->SetFaceBoundaryDraw(true);
+        presentation->SetColor(componentColor(Part::Shell, false));
+        replacements.emplace(plate.id, DisplayedObject{plate.part, presentation});
     }
-    pending_ = plates;
-    envelope_.reset();
-    if (initialized()) displayPending();
+    replaceObjects(std::move(replacements), false);
 }
 
 void OcctView::showEnvelope(const EnvelopeDimensions& dimensions) {
-    // Check geometry first; an envelope is never inserted in Project::plates().
-    makeEnvelopeShapes(dimensions);
-    pending_.clear();
-    envelope_ = dimensions;
+    std::map<std::string, DisplayedObject> replacements;
+    for (const auto& component : makeEnvelopeShapes(dimensions)) {
+        const auto key = "component-preview/" + std::to_string(static_cast<int>(component.part));
+        auto presentation = occ::handle<AIS_Shape>(new AIS_Shape(component.shape));
+        // A periodic surface seam is not a manufacturing plate joint.
+        presentation->Attributes()->SetFaceBoundaryDraw(false);
+        replacements.emplace(key, DisplayedObject{component.part, presentation});
+    }
+    replaceObjects(std::move(replacements), true);
+}
+
+void OcctView::replaceObjects(std::map<std::string, DisplayedObject> replacements, bool envelope) {
+    if (initialized()) context_->RemoveAll(false);
+    objects_ = std::move(replacements);
+    displayingEnvelope_ = envelope;
     if (initialized()) displayPending();
 }
 
 void OcctView::displayPending() {
-    std::map<std::string, DisplayedObject> replacements;
-    if (envelope_) {
-        for (const auto& component : makeEnvelopeShapes(*envelope_)) {
-            const auto key = "component-preview/" + std::to_string(static_cast<int>(component.part));
-            auto object = occ::handle<AIS_Shape>(new AIS_Shape(component.shape));
-            // A periodic surface seam is not a manufacturing plate joint.
-            object->Attributes()->SetFaceBoundaryDraw(false);
-            replacements.emplace(key, DisplayedObject{component.part, object});
-        }
-    }
-    for (const auto& plate : pending_) {
-        auto object = occ::handle<AIS_Shape>(new AIS_Shape(makeInstalledShape(plate.installed)));
-        object->Attributes()->SetFaceBoundaryDraw(true);
-        object->SetColor(Quantity_Color(0.65, 0.72, 0.78, Quantity_TOC_RGB));
-        replacements.emplace(plate.id, DisplayedObject{plate.part, object});
-    }
-    context_->RemoveAll(false);
-    objects_ = std::move(replacements);
+    // Validated presentations are cached even before the native view is created.
     for (const auto& [id, object] : objects_) {
         if (partVisible_.at(static_cast<std::size_t>(object.part))) {
             context_->Display(object.presentation, false);
@@ -177,8 +195,7 @@ void OcctView::displayPending() {
 }
 
 void OcctView::clearPlates() {
-    envelope_.reset();
-    pending_.clear();
+    displayingEnvelope_ = false;
     objects_.clear();
     if (!context_.IsNull()) {
         context_->RemoveAll(false);
@@ -219,6 +236,7 @@ void OcctView::zoom(double factor) {
 }
 
 std::size_t OcctView::displayedComponentCount() const {
+    if (!initialized()) return 0;
     std::array<bool, 3> seen{};
     for (const auto& [id, object] : objects_) {
         const auto partIndex = static_cast<std::size_t>(object.part);

@@ -9,6 +9,10 @@
 #include <QWheelEvent>
 #include <QImage>
 #include <QScreen>
+#include <QMessageBox>
+#include <QAbstractButton>
+#include <QTimer>
+#include <limits>
 #include <BRepBndLib.hxx>
 #include <Bnd_Box.hxx>
 #include <BRepCheck_Analyzer.hxx>
@@ -21,6 +25,79 @@ using namespace smarttank;
 class WorkspaceTests : public QObject {
     Q_OBJECT
 private slots:
+    void closingProtectsModifiedAndUnappliedInput() {
+        MainWindow window;
+        window.show();
+        auto* edit = window.findChild<QLineEdit*>("diameter_mm");
+        edit->setFocus();
+        QTest::keyClicks(edit, "2000");
+        const auto rejectClose = [&window] {
+            auto* message = window.findChild<QMessageBox*>();
+            QVERIFY(message);
+            message->button(QMessageBox::No)->click();
+        };
+        QTimer::singleShot(0, &window, rejectClose);
+        QVERIFY(!window.close());
+        QVERIFY(window.isVisible());
+        QTest::keyClick(edit, Qt::Key_Return);
+        QVERIFY(window.isWindowModified());
+        QTimer::singleShot(0, &window, rejectClose);
+        QVERIFY(!window.close());
+        QTimer::singleShot(0, &window, [&window] {
+            auto* message = window.findChild<QMessageBox*>();
+            QVERIFY(message);
+            message->button(QMessageBox::Yes)->click();
+        });
+        QVERIFY(window.close());
+        QVERIFY(!window.isVisible());
+        MainWindow cleanWindow;
+        cleanWindow.show();
+        QVERIFY(cleanWindow.close());
+    }
+    void parameterRoundTripPreservesPrecisionAndRevision() {
+        MainWindow window;
+        window.show();
+        auto* edit = window.findChild<QLineEdit*>("diameter_mm");
+        const double input = 6000.123456789012;
+        edit->setText(window.locale().toString(input, 'g', std::numeric_limits<double>::max_digits10));
+        QTest::keyClick(edit, Qt::Key_Return);
+        const auto revision = window.project().revision();
+        auto* tree = window.findChild<QTreeWidget*>("componentTree");
+        tree->setCurrentItem(tree->topLevelItem(0)->child(2));
+        tree->setCurrentItem(tree->topLevelItem(0)->child(1));
+        edit = window.findChild<QLineEdit*>("diameter_mm");
+        QCOMPARE(window.locale().toDouble(edit->text()), input);
+        QTest::keyClick(edit, Qt::Key_Return);
+        QCOMPARE(window.project().parameters(Part::Shell).at("diameter_mm"), input);
+        QCOMPARE(window.project().revision(), revision);
+    }
+    void nativeCachedGeometrySurvivesInitializationAndInvalidReplacement() {
+        if (QGuiApplication::platformName() != "windows") QSKIP("Requires native Windows graphics");
+        OcctView view;
+        view.showEnvelope({3000, 4000, 800});
+        view.show();
+        QVERIFY(QTest::qWaitForWindowExposed(&view));
+        QVERIFY2(view.initialized(), qPrintable(view.failure()));
+        QCOMPARE(view.displayedComponentCount(), std::size_t(3));
+        QVERIFY_THROWS_EXCEPTION(std::invalid_argument, view.showEnvelope({-1, 4000, 800}));
+        QCOMPARE(view.displayedComponentCount(), std::size_t(3));
+        Plate valid;
+        valid.id = "cached-plate";
+        valid.installed.parameterBoundary = {{0, 0}, {100, 0}, {100, 100}, {0, 100}};
+        view.showPlates({valid});
+        QCOMPARE(view.displayedPlateCount(), std::size_t(1));
+        QVERIFY_THROWS_EXCEPTION(std::invalid_argument, view.showPlates({valid, valid}));
+        QCOMPARE(view.displayedPlateCount(), std::size_t(1));
+        QVERIFY(view.close());
+        QVERIFY(!view.initialized());
+        view.show();
+        QVERIFY(QTest::qWaitForWindowExposed(&view));
+        QVERIFY2(view.initialized(), qPrintable(view.failure()));
+        QCOMPARE(view.displayedPlateCount(), std::size_t(1));
+        QVERIFY(!view.snapshot().isNull());
+        view.clearPlates();
+        QCOMPARE(view.displayedComponentCount(), std::size_t(0));
+    }
     void nativeViewportFillsWidgetAfterResizeAndCapture() {
         if (QGuiApplication::platformName() != "windows") QSKIP("Requires native Windows graphics");
         MainWindow window;

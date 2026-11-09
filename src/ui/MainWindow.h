@@ -18,6 +18,9 @@ public:
     const Project& project() const { return project_; }
     OcctView* view() const { return view_; }
 
+protected:
+    void closeEvent(QCloseEvent* event) override;
+
 private:
     struct WorkspaceActions {
         QAction* newProject = nullptr;

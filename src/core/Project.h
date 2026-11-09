@@ -37,24 +37,24 @@ struct Plate {
     std::string id;
     Part part = Part::Bottom;
     std::string manufacturingNumber;
-    std::optional<std::string> material;
-    std::optional<double> thicknessMm;
+    std::optional<std::string> material = std::nullopt;
+    std::optional<double> thicknessMm = std::nullopt;
     InstalledSurface installed;
     std::vector<ContourSegment> manufacturingContour;
     Parameters manufacturingDimensions;
 };
 
 struct LayoutDefinition {
-    std::optional<std::string> confirmedRule;
+    std::optional<std::string> confirmedRule = std::nullopt;
     Parameters inputs;
 };
 
 struct CalculationBasis {
-    std::optional<std::string> standardEdition;
-    std::optional<std::string> addenda;
-    std::optional<std::string> material;
-    std::optional<std::string> materialSource;
-    std::optional<std::string> confirmedChecks;
+    std::optional<std::string> standardEdition = std::nullopt;
+    std::optional<std::string> addenda = std::nullopt;
+    std::optional<std::string> material = std::nullopt;
+    std::optional<std::string> materialSource = std::nullopt;
+    std::optional<std::string> confirmedChecks = std::nullopt;
 };
 
 enum class ResultState { Missing, Current, Stale, Invalid };

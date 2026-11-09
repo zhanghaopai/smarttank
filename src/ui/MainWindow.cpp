@@ -11,6 +11,8 @@
 #include <QMessageBox>
 #include <QAction>
 #include <QLocale>
+#include <QCloseEvent>
+#include <limits>
 #include <cmath>
 #include <vector>
 #include <Standard_Failure.hxx>
@@ -112,7 +114,9 @@ void MainWindow::addParameterField(Part part, const char* key, const QString& fi
     fieldLayout->addWidget(error);
     const auto& values = project_.parameters(part);
     const auto value = values.find(key);
-    if (value != values.end()) edit->setText(locale().toString(value->second, 'g', 15));
+    if (value != values.end()) {
+        edit->setText(locale().toString(value->second, 'g', std::numeric_limits<double>::max_digits10));
+    }
     auto* label = new QLabel(fieldLabel, parameterPanel_);
     label->setBuddy(edit);
     form_->addRow(label, fieldPanel);
@@ -122,7 +126,7 @@ void MainWindow::addParameterField(Part part, const char* key, const QString& fi
 }
 
 void MainWindow::applyParameterInput(Part part, const std::string& key, QLineEdit* edit, QLabel* error) {
-    std::optional<double> value;
+    std::optional<double> value = std::nullopt;
     if (!edit->text().trimmed().isEmpty()) {
         bool ok = false;
         const auto number = locale().toDouble(edit->text().trimmed(), &ok);
@@ -197,6 +201,21 @@ void MainWindow::newProject() {
     setWindowModified(false);
     selectPart(selected_);
     refreshStatus();
+}
+
+void MainWindow::closeEvent(QCloseEvent* event) {
+    bool hasUnappliedInput = false;
+    for (const auto* edit : parameterPanel_->findChildren<QLineEdit*>()) {
+        hasUnappliedInput = hasUnappliedInput || edit->isModified();
+    }
+    if ((isWindowModified() || hasUnappliedInput)
+        && QMessageBox::question(this, QStringLiteral("退出 SmartTank"),
+            QStringLiteral("当前参数尚未保存，是否丢弃并退出？"),
+            QMessageBox::Yes | QMessageBox::No, QMessageBox::No) != QMessageBox::Yes) {
+        event->ignore();
+        return;
+    }
+    event->accept();
 }
 
 void MainWindow::loadPreviewExample() {
