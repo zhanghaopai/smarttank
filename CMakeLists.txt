@@ -29,7 +29,10 @@ target_link_libraries(smarttank_view PUBLIC smarttank_geometry Qt6::Widgets
     TKV3d TKOpenGl TKService)
 target_compile_options(smarttank_view PRIVATE /W4 /utf-8)
 
-add_library(smarttank_ui src/ui/MainWindow.cpp)
+add_library(smarttank_ui
+    src/ui/MainWindow.cpp
+    src/ui/MainWindowLayout.cpp
+    src/ui/MainWindowActions.cpp)
 set_target_properties(smarttank_ui PROPERTIES AUTOMOC ON)
 target_include_directories(smarttank_ui PUBLIC src)
 target_link_libraries(smarttank_ui PUBLIC smarttank_view)

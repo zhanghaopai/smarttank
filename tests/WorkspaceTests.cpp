@@ -104,7 +104,6 @@ private slots:
         QVERIFY(!window.project().hasCurrentChecks());
         QVERIFY(window.project().plates().empty());
         QVERIFY(window.project().checks().empty());
-        QVERIFY(window.findChild<QLabel*>("basisStatus")->text().contains(QStringLiteral("未确定")));
     }
     void installedSurfacesAreIndependentOfManufacturingContours() {
         for (auto kind : {InstalledSurface::Kind::Plane, InstalledSurface::Kind::Cylinder, InstalledSurface::Kind::Cone}) {

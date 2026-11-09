@@ -45,15 +45,20 @@ protected:
     void wheelEvent(QWheelEvent* event) override;
 
 private:
+    struct DisplayedObject {
+        Part part;
+        occ::handle<AIS_Shape> presentation;
+    };
+
     void initialize();
+    void handleInitializationFailure(const QString& reason);
     void synchronizeViewport();
     void displayPending();
     bool native_;
     QString failure_;
     occ::handle<V3d_View> view_;
     occ::handle<AIS_InteractiveContext> context_;
-    std::map<std::string, occ::handle<AIS_Shape>> objects_;
-    std::map<std::string, Part> parts_;
+    std::map<std::string, DisplayedObject> objects_;
     std::vector<Plate> pending_;
     std::optional<EnvelopeDimensions> envelope_;
     std::optional<Part> selectedPart_;

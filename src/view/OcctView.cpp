@@ -18,6 +18,18 @@
 #include <stdexcept>
 
 namespace smarttank {
+namespace {
+Quantity_Color componentColor(Part part, bool selected) {
+    if (selected) return Quantity_Color(0.95, 0.65, 0.2, Quantity_TOC_RGB);
+    switch (part) {
+    case Part::Roof: return Quantity_Color(0.48, 0.62, 0.72, Quantity_TOC_RGB);
+    case Part::Bottom: return Quantity_Color(0.38, 0.48, 0.56, Quantity_TOC_RGB);
+    case Part::Shell: return Quantity_Color(0.65, 0.72, 0.78, Quantity_TOC_RGB);
+    }
+    return Quantity_Color(0.65, 0.72, 0.78, Quantity_TOC_RGB);
+}
+} // namespace
+
 OcctView::OcctView(QWidget* parent)
     : QWidget(parent), native_(QGuiApplication::platformName() == "windows") {
     setObjectName("occtView");
@@ -35,9 +47,11 @@ OcctView::~OcctView() {
     if (!view_.IsNull()) view_->Remove();
     view_.Nullify();
 }
+
 QPaintEngine* OcctView::paintEngine() const {
     return native_ ? nullptr : QWidget::paintEngine();
 }
+
 void OcctView::initialize() {
     occ::handle<Aspect_DisplayConnection> display = new Aspect_DisplayConnection();
     occ::handle<OpenGl_GraphicDriver> driver = new OpenGl_GraphicDriver(display);
@@ -61,25 +75,33 @@ void OcctView::initialize() {
     view_->MustBeResized();
     displayPending();
 }
+
 void OcctView::showEvent(QShowEvent* event) {
     QWidget::showEvent(event);
     if (!native_ || initialized() || !failure_.isEmpty()) return;
     try { initialize(); }
     catch (const Standard_Failure& error) {
-        failure_ = QString::fromUtf8(error.what());
-        if (!view_.IsNull()) view_->Remove();
-        view_.Nullify(); context_.Nullify();
-        emit renderingFailed(failure_);
+        handleInitializationFailure(QString::fromUtf8(error.what()));
     }
     catch (const std::exception& error) {
-        failure_ = QString::fromUtf8(error.what());
-        if (!view_.IsNull()) view_->Remove();
-        view_.Nullify(); context_.Nullify();
-        emit renderingFailed(failure_);
+        handleInitializationFailure(QString::fromUtf8(error.what()));
     }
 }
+
+void OcctView::handleInitializationFailure(const QString& reason) {
+    failure_ = reason;
+    if (!view_.IsNull()) view_->Remove();
+    view_.Nullify();
+    context_.Nullify();
+    emit renderingFailed(failure_);
+}
+
 void OcctView::paintEvent(QPaintEvent*) {
-    if (initialized()) { synchronizeViewport(); view_->Redraw(); return; }
+    if (initialized()) {
+        synchronizeViewport();
+        view_->Redraw();
+        return;
+    }
     if (!native_) {
         QPainter painter(this);
         painter.fillRect(rect(), QColor(31, 38, 48));
@@ -87,10 +109,15 @@ void OcctView::paintEvent(QPaintEvent*) {
         painter.drawText(rect(), Qt::AlignCenter, tr("三维查看器需要 Windows 图形环境"));
     }
 }
+
 void OcctView::resizeEvent(QResizeEvent* event) {
     QWidget::resizeEvent(event);
-    if (initialized()) { synchronizeViewport(); update(); }
+    if (initialized()) {
+        synchronizeViewport();
+        update();
+    }
 }
+
 void OcctView::synchronizeViewport() {
     if (!initialized()) return;
     const auto window = occ::handle<Aspect_NeutralWindow>::DownCast(view_->Window());
@@ -99,6 +126,7 @@ void OcctView::synchronizeViewport() {
     if (window->SetSize(qRound(width() * devicePixelRatioF()), qRound(height() * devicePixelRatioF())))
         view_->MustBeResized();
 }
+
 void OcctView::showPlates(const std::vector<Plate>& plates) {
     // Validate the complete replacement before changing the current presentation.
     std::map<std::string, occ::handle<AIS_Shape>> replacements;
@@ -111,6 +139,7 @@ void OcctView::showPlates(const std::vector<Plate>& plates) {
     envelope_.reset();
     if (initialized()) displayPending();
 }
+
 void OcctView::showEnvelope(const EnvelopeDimensions& dimensions) {
     // Check geometry first; an envelope is never inserted in Project::plates().
     makeEnvelopeShapes(dimensions);
@@ -118,108 +147,128 @@ void OcctView::showEnvelope(const EnvelopeDimensions& dimensions) {
     envelope_ = dimensions;
     if (initialized()) displayPending();
 }
+
 void OcctView::displayPending() {
-    std::map<std::string, occ::handle<AIS_Shape>> replacements;
-    std::map<std::string, Part> parts;
+    std::map<std::string, DisplayedObject> replacements;
     if (envelope_) {
         for (const auto& component : makeEnvelopeShapes(*envelope_)) {
             const auto key = "component-preview/" + std::to_string(static_cast<int>(component.part));
             auto object = occ::handle<AIS_Shape>(new AIS_Shape(component.shape));
             // A periodic surface seam is not a manufacturing plate joint.
             object->Attributes()->SetFaceBoundaryDraw(false);
-            replacements.emplace(key, object);
-            parts.emplace(key, component.part);
+            replacements.emplace(key, DisplayedObject{component.part, object});
         }
     }
     for (const auto& plate : pending_) {
         auto object = occ::handle<AIS_Shape>(new AIS_Shape(makeInstalledShape(plate.installed)));
         object->Attributes()->SetFaceBoundaryDraw(true);
         object->SetColor(Quantity_Color(0.65, 0.72, 0.78, Quantity_TOC_RGB));
-        replacements.emplace(plate.id, object);
-        parts.emplace(plate.id, plate.part);
+        replacements.emplace(plate.id, DisplayedObject{plate.part, object});
     }
     context_->RemoveAll(false);
     objects_ = std::move(replacements);
-    parts_ = std::move(parts);
-    for (const auto& entry : objects_)
-        if (partVisible_.at(static_cast<std::size_t>(parts_.at(entry.first))))
-            context_->Display(entry.second, false);
+    for (const auto& [id, object] : objects_) {
+        if (partVisible_.at(static_cast<std::size_t>(object.part))) {
+            context_->Display(object.presentation, false);
+        }
+    }
     if (selectedPart_) highlightPart(*selectedPart_);
     fitAll();
 }
+
 void OcctView::clearPlates() {
     envelope_.reset();
-    pending_.clear(); objects_.clear(); parts_.clear();
-    if (!context_.IsNull()) { context_->RemoveAll(false); view_->Redraw(); }
+    pending_.clear();
+    objects_.clear();
+    if (!context_.IsNull()) {
+        context_->RemoveAll(false);
+        view_->Redraw();
+    }
     update();
 }
+
 void OcctView::fitAll() {
     if (!initialized()) return;
-    if (!objects_.empty()) { view_->FitAll(0.05, false); view_->ZFitAll(); }
-    view_->Redraw();
-}
-void OcctView::highlightPart(Part part) {
-    selectedPart_ = part;
-    if (!initialized()) return;
-    for (const auto& entry : objects_) {
-        context_->SetColor(entry.second,
-            parts_.at(entry.first) == part ? Quantity_Color(0.95, 0.65, 0.2, Quantity_TOC_RGB)
-                : parts_.at(entry.first) == Part::Roof ? Quantity_Color(0.48, 0.62, 0.72, Quantity_TOC_RGB)
-                : parts_.at(entry.first) == Part::Bottom ? Quantity_Color(0.38, 0.48, 0.56, Quantity_TOC_RGB)
-                : Quantity_Color(0.65, 0.72, 0.78, Quantity_TOC_RGB), false);
+    if (!objects_.empty()) {
+        view_->FitAll(0.05, false);
+        view_->ZFitAll();
     }
     view_->Redraw();
 }
+
+void OcctView::highlightPart(Part part) {
+    selectedPart_ = part;
+    if (!initialized()) return;
+    for (const auto& [id, object] : objects_) {
+        const auto color = componentColor(object.part, object.part == part);
+        context_->SetColor(object.presentation, color, false);
+    }
+    view_->Redraw();
+}
+
 void OcctView::rotate(double horizontalRadians, double verticalRadians) {
     if (!initialized()) return;
     view_->Rotate(verticalRadians, horizontalRadians, 0.0);
     view_->Redraw();
 }
+
 void OcctView::zoom(double factor) {
     if (!initialized()) return;
     view_->SetScale(std::clamp(view_->Scale() * factor, 1e-6, 1e6));
     view_->Redraw();
 }
+
 std::size_t OcctView::displayedComponentCount() const {
     std::array<bool, 3> seen{};
-    for (const auto& part : parts_)
-        if (partVisible_.at(static_cast<std::size_t>(part.second)))
-            seen.at(static_cast<std::size_t>(part.second)) = true;
+    for (const auto& [id, object] : objects_) {
+        const auto partIndex = static_cast<std::size_t>(object.part);
+        if (partVisible_.at(partIndex)) seen.at(partIndex) = true;
+    }
     return static_cast<std::size_t>(std::count(seen.begin(), seen.end(), true));
 }
+
 void OcctView::setProjection(V3d_TypeOfOrientation orientation) {
     if (!initialized()) return;
     view_->SetProj(orientation);
     fitAll();
 }
+
 void OcctView::setPartVisible(Part part, bool visible) {
     partVisible_.at(static_cast<std::size_t>(part)) = visible;
     if (!initialized()) return;
-    for (const auto& entry : objects_) {
-        if (parts_.at(entry.first) != part) continue;
-        if (visible) context_->Display(entry.second, false);
-        else context_->Erase(entry.second, false);
+    for (const auto& [id, object] : objects_) {
+        if (object.part != part) continue;
+        if (visible) {
+            context_->Display(object.presentation, false);
+        } else {
+            context_->Erase(object.presentation, false);
+        }
     }
     view_->Redraw();
 }
+
 void OcctView::mousePressEvent(QMouseEvent* event) {
     if (initialized() && event->button() == Qt::LeftButton)
         view_->StartRotation(qRound(event->position().x() * devicePixelRatioF()),
                              qRound(event->position().y() * devicePixelRatioF()));
 }
+
 void OcctView::mouseMoveEvent(QMouseEvent* event) {
     if (initialized() && (event->buttons() & Qt::LeftButton))
         view_->Rotation(qRound(event->position().x() * devicePixelRatioF()),
                         qRound(event->position().y() * devicePixelRatioF()));
 }
+
 void OcctView::wheelEvent(QWheelEvent* event) {
     if (!initialized()) return;
     zoom(std::pow(1.15, event->angleDelta().y() / 120.0));
     event->accept();
 }
+
 bool OcctView::capture(const QString& path) {
     return snapshot().save(path);
 }
+
 QImage OcctView::snapshot() {
     if (!initialized()) return {};
     Image_AlienPixMap image;
@@ -233,13 +282,15 @@ QImage OcctView::snapshot() {
     if (format != Image_Format_RGB && format != Image_Format_BGR
         && format != Image_Format_RGBA && format != Image_Format_BGRA) return {};
     QImage output(width(), height(), QImage::Format_RGB32);
-    const auto bytes = (format == Image_Format_RGB || format == Image_Format_BGR) ? 3 : 4;
+    const bool hasAlpha = format == Image_Format_RGBA || format == Image_Format_BGRA;
+    const bool blueFirst = format == Image_Format_BGR || format == Image_Format_BGRA;
+    const int bytesPerPixel = hasAlpha ? 4 : 3;
     for (int y = 0; y < height(); ++y) {
-        const auto row = image.IsTopDown() ? y : height() - 1 - y;
-        const auto* rowData = buffer + static_cast<std::size_t>(row) * image.SizeRowBytes();
+        const auto sourceRow = image.IsTopDown() ? y : height() - 1 - y;
+        const auto* rowData = buffer + static_cast<std::size_t>(sourceRow) * image.SizeRowBytes();
         for (int x = 0; x < width(); ++x) {
-            const auto* pixel = rowData + x * bytes;
-            output.setPixel(x, y, format == Image_Format_BGR || format == Image_Format_BGRA
+            const auto* pixel = rowData + x * bytesPerPixel;
+            output.setPixel(x, y, blueFirst
                 ? qRgb(pixel[2], pixel[1], pixel[0]) : qRgb(pixel[0], pixel[1], pixel[2]));
         }
     }
