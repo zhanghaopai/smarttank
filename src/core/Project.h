@@ -92,7 +92,7 @@ public:
     bool hasCurrentChecks() const;
 
 private:
-    void changed();
+    void markInputsChanged();
     std::array<Parameters, 3> parameters_;
     std::array<LayoutDefinition, 3> layouts_;
     CalculationBasis basis_;

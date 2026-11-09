@@ -22,7 +22,9 @@ target_link_libraries(smarttank_geometry PUBLIC smarttank_core
     TKernel TKMath TKG3d TKGeomBase TKBRep TKTopAlgo TKPrim)
 target_compile_options(smarttank_geometry PRIVATE /W4 /utf-8)
 
-add_library(smarttank_view src/view/OcctView.cpp)
+add_library(smarttank_view
+    src/view/OcctView.cpp
+    src/view/OcctViewPresentation.cpp)
 set_target_properties(smarttank_view PROPERTIES AUTOMOC ON)
 target_include_directories(smarttank_view PUBLIC src)
 target_link_libraries(smarttank_view PUBLIC smarttank_geometry Qt6::Widgets
@@ -32,7 +34,8 @@ target_compile_options(smarttank_view PRIVATE /W4 /utf-8)
 add_library(smarttank_ui
     src/ui/MainWindow.cpp
     src/ui/MainWindowLayout.cpp
-    src/ui/MainWindowActions.cpp)
+    src/ui/MainWindowActions.cpp
+    src/ui/ParameterEditor.cpp)
 set_target_properties(smarttank_ui PROPERTIES AUTOMOC ON)
 target_include_directories(smarttank_ui PUBLIC src)
 target_link_libraries(smarttank_ui PUBLIC smarttank_view)

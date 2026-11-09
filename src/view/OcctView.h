@@ -27,7 +27,10 @@ public:
     void rotate(double horizontalRadians, double verticalRadians);
     void zoom(double factor);
     void highlightPart(Part part);
-    std::size_t displayedPlateCount() const { return initialized() && !displayingEnvelope_ ? objects_.size() : 0; }
+    std::size_t displayedPlateCount() const {
+        if (!initialized() || presentationKind_ != PresentationKind::Plates) return 0;
+        return objects_.size();
+    }
     std::size_t displayedComponentCount() const;
     void setProjection(V3d_TypeOfOrientation orientation);
     void setPartVisible(Part part, bool visible);
@@ -48,6 +51,8 @@ protected:
     void wheelEvent(QWheelEvent* event) override;
 
 private:
+    enum class PresentationKind { Plates, Envelope };
+
     struct DisplayedObject {
         Part part;
         occ::handle<AIS_Shape> presentation;
@@ -57,15 +62,15 @@ private:
     void releaseViewer();
     void handleInitializationFailure(const QString& reason);
     void synchronizeViewport();
-    void displayPending();
-    void replaceObjects(std::map<std::string, DisplayedObject> replacements, bool envelope);
+    void displayCachedObjects();
+    void replaceObjects(std::map<std::string, DisplayedObject> replacements, PresentationKind kind);
     bool native_;
     QString failure_;
     QPointer<QWindow> surfaceWindow_;
     occ::handle<V3d_View> view_;
     occ::handle<AIS_InteractiveContext> context_;
     std::map<std::string, DisplayedObject> objects_;
-    bool displayingEnvelope_ = false;
+    PresentationKind presentationKind_ = PresentationKind::Plates;
     std::optional<Part> selectedPart_ = std::nullopt;
     std::array<bool, 3> partVisible_{{true, true, true}};
 };

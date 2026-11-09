@@ -1,19 +1,15 @@
 #include "ui/MainWindow.h"
+#include "ui/ParameterEditor.h"
 #include "view/OcctView.h"
 #include "geometry/EnvelopeGeometry.h"
 #include <QTreeWidget>
 #include <QFormLayout>
-#include <QVBoxLayout>
 #include <QLineEdit>
 #include <QLabel>
 #include <QFont>
 #include <QStatusBar>
 #include <QMessageBox>
-#include <QAction>
-#include <QLocale>
 #include <QCloseEvent>
-#include <limits>
-#include <cmath>
 #include <vector>
 #include <Standard_Failure.hxx>
 
@@ -80,8 +76,8 @@ void MainWindow::connectWorkspaceSignals() {
                                  item->checkState(0) == Qt::Checked);
     });
     connect(view_, &OcctView::renderingFailed, this, [this](const QString& reason) {
-        designStatus_->setText(QStringLiteral("三维视图初始化失败：") + reason);
-        designStatus_->show();
+        previewErrorLabel_->setText(QStringLiteral("三维视图初始化失败：") + reason);
+        previewErrorLabel_->show();
         statusBar()->showMessage(QStringLiteral("三维视图不可用"));
     });
 }
@@ -98,59 +94,25 @@ void MainWindow::selectPart(Part part) {
 }
 
 void MainWindow::addParameterField(Part part, const char* key, const QString& fieldLabel) {
-    auto* edit = new QLineEdit(parameterPanel_);
-    edit->setObjectName(QString::fromLatin1(key));
-    edit->setPlaceholderText(QStringLiteral("未输入"));
-    edit->setAccessibleName(fieldLabel);
-    edit->setMinimumHeight(fontMetrics().height() + 12);
-    edit->setClearButtonEnabled(true);
-    auto* fieldPanel = new QWidget(parameterPanel_);
-    auto* fieldLayout = new QVBoxLayout(fieldPanel);
-    fieldLayout->setContentsMargins(0, 0, 0, 0);
-    fieldLayout->addWidget(edit);
-    auto* error = new QLabel(fieldPanel);
-    error->setWordWrap(true);
-    error->hide();
-    fieldLayout->addWidget(error);
     const auto& values = project_.parameters(part);
-    const auto value = values.find(key);
-    if (value != values.end()) {
-        edit->setText(locale().toString(value->second, 'g', std::numeric_limits<double>::max_digits10));
-    }
+    const auto found = values.find(key);
+    const auto value = found == values.end() ? std::nullopt : std::optional<double>(found->second);
+    auto* editor = new ParameterEditor(QString::fromLatin1(key), fieldLabel, value, parameterPanel_);
     auto* label = new QLabel(fieldLabel, parameterPanel_);
-    label->setBuddy(edit);
-    form_->addRow(label, fieldPanel);
-    connect(edit, &QLineEdit::editingFinished, this, [this, edit, error, part, key = std::string(key)] {
-        applyParameterInput(part, key, edit, error);
-    });
-}
-
-void MainWindow::applyParameterInput(Part part, const std::string& key, QLineEdit* edit, QLabel* error) {
-    std::optional<double> value = std::nullopt;
-    if (!edit->text().trimmed().isEmpty()) {
-        bool ok = false;
-        const auto number = locale().toDouble(edit->text().trimmed(), &ok);
-        if (!ok || !std::isfinite(number) || number <= 0) {
-            error->setText(QStringLiteral("输入错误：请输入大于零的有效数值，或清空。本次输入尚未应用。"));
-            error->show();
-            edit->setAccessibleDescription(error->text());
-            return;
-        }
-        value = number;
-    }
-    error->hide();
-    edit->setAccessibleDescription({});
-    if (project_.setParameter(part, key, value)) {
+    label->setBuddy(editor->input());
+    form_->addRow(label, editor);
+    connect(editor, &ParameterEditor::valueApplied, this, [this, part, key = std::string(key)](std::optional<double> value) {
+        if (!project_.setParameter(part, key, value)) return;
         setWindowModified(true);
         updatePreview();
         refreshStatus();
-    }
+    });
 }
 
 void MainWindow::refreshStatus() {
     if (view_->failure().isEmpty()) {
-        designStatus_->setText(previewStatus_);
-        designStatus_->setVisible(!previewStatus_.isEmpty());
+        previewErrorLabel_->setText(previewError_);
+        previewErrorLabel_->setVisible(!previewError_.isEmpty());
     }
     resultStatus_->setText(QStringLiteral("排板：%1    校核：%2\n基础校核不包含风、地震、锚固等专项。")
         .arg(resultStateName(project_.layoutStamp()), resultStateName(project_.calculationStamp())));
@@ -158,21 +120,24 @@ void MainWindow::refreshStatus() {
 }
 
 void MainWindow::updatePreview() {
-    previewStatus_.clear();
+    previewError_.clear();
     try {
         const auto dimensions = envelopeDimensions(project_);
         if (!dimensions) {
             view_->clearPlates();
-        } else {
-            view_->showEnvelope(*dimensions);
+            return;
         }
+        view_->showEnvelope(*dimensions);
     } catch (const Standard_Failure& error) {
-        view_->clearPlates();
-        previewStatus_ = QStringLiteral("无法生成外形预览：") + QString::fromUtf8(error.what());
+        showPreviewFailure(QString::fromUtf8(error.what()));
     } catch (const std::exception& error) {
-        view_->clearPlates();
-        previewStatus_ = QStringLiteral("无法生成外形预览：") + QString::fromUtf8(error.what());
+        showPreviewFailure(QString::fromUtf8(error.what()));
     }
+}
+
+void MainWindow::showPreviewFailure(const QString& reason) {
+    view_->clearPlates();
+    previewError_ = QStringLiteral("无法生成外形预览：") + reason;
 }
 
 void MainWindow::generateLayout() {
@@ -193,9 +158,8 @@ void MainWindow::exportUnavailable() {
 }
 
 void MainWindow::newProject() {
-    if (isWindowModified() && QMessageBox::question(this, QStringLiteral("新建工程"),
-        QStringLiteral("当前参数尚未保存，是否清空并新建工程？"), QMessageBox::Yes | QMessageBox::No,
-        QMessageBox::No) != QMessageBox::Yes) return;
+    if (!confirmDiscardChanges(QStringLiteral("新建工程"),
+        QStringLiteral("当前参数尚未保存，是否清空并新建工程？"))) return;
     project_ = Project{};
     updatePreview();
     setWindowModified(false);
@@ -203,15 +167,23 @@ void MainWindow::newProject() {
     refreshStatus();
 }
 
-void MainWindow::closeEvent(QCloseEvent* event) {
-    bool hasUnappliedInput = false;
-    for (const auto* edit : parameterPanel_->findChildren<QLineEdit*>()) {
-        hasUnappliedInput = hasUnappliedInput || edit->isModified();
+bool MainWindow::hasUnsavedChanges() const {
+    if (isWindowModified()) return true;
+    for (const auto* editor : parameterPanel_->findChildren<ParameterEditor*>()) {
+        if (editor->hasUnappliedInput()) return true;
     }
-    if ((isWindowModified() || hasUnappliedInput)
-        && QMessageBox::question(this, QStringLiteral("退出 SmartTank"),
-            QStringLiteral("当前参数尚未保存，是否丢弃并退出？"),
-            QMessageBox::Yes | QMessageBox::No, QMessageBox::No) != QMessageBox::Yes) {
+    return false;
+}
+
+bool MainWindow::confirmDiscardChanges(const QString& title, const QString& message) {
+    if (!hasUnsavedChanges()) return true;
+    return QMessageBox::question(this, title, message, QMessageBox::Yes | QMessageBox::No,
+        QMessageBox::No) == QMessageBox::Yes;
+}
+
+void MainWindow::closeEvent(QCloseEvent* event) {
+    if (!confirmDiscardChanges(QStringLiteral("退出 SmartTank"),
+        QStringLiteral("当前参数尚未保存，是否丢弃并退出？"))) {
         event->ignore();
         return;
     }
@@ -219,9 +191,8 @@ void MainWindow::closeEvent(QCloseEvent* event) {
 }
 
 void MainWindow::loadPreviewExample() {
-    if (isWindowModified() && QMessageBox::question(this, QStringLiteral("载入示例尺寸"),
-        QStringLiteral("是否用示例尺寸替换当前直径、高度和锥顶升高？其余参数保持不变。"),
-        QMessageBox::Yes | QMessageBox::No, QMessageBox::No) != QMessageBox::Yes) return;
+    if (!confirmDiscardChanges(QStringLiteral("载入示例尺寸"),
+        QStringLiteral("是否用示例尺寸替换当前直径、高度和锥顶升高？其余参数保持不变。"))) return;
     project_.setParameter(Part::Shell, "diameter_mm", 6000.0);
     project_.setParameter(Part::Shell, "height_mm", 4000.0);
     project_.setParameter(Part::Roof, "rise_mm", 800.0);

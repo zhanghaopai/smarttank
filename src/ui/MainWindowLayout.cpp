@@ -37,11 +37,11 @@ QWidget* MainWindow::createPreviewPanel() {
     auto* previewTitle = new QLabel(QStringLiteral("储罐外形预览"), previewPanel);
     previewTitle->setFont(sectionHeadingFont(this));
     previewLayout->addWidget(previewTitle);
-    designStatus_ = new QLabel(previewPanel);
-    designStatus_->setObjectName("designStatus");
-    designStatus_->setWordWrap(true);
-    designStatus_->hide();
-    previewLayout->addWidget(designStatus_);
+    previewErrorLabel_ = new QLabel(previewPanel);
+    previewErrorLabel_->setObjectName("designStatus");
+    previewErrorLabel_->setWordWrap(true);
+    previewErrorLabel_->hide();
+    previewLayout->addWidget(previewErrorLabel_);
     view_ = new OcctView(previewPanel);
     previewLayout->addWidget(view_, 1);
     auto* navigationHelp = new QLabel(QStringLiteral("旋转：左键拖动 / Alt+方向键\n缩放：滚轮 / Ctrl++、Ctrl+- · Ctrl+0 适合窗口"), previewPanel);

@@ -3,7 +3,6 @@
 #include <QList>
 #include "core/Project.h"
 class QTreeWidget;
-class QLineEdit;
 class QLabel;
 class QFormLayout;
 class QMenu;
@@ -43,7 +42,6 @@ private:
     void createToolbar(const WorkspaceActions& actions);
     void connectWorkspaceSignals();
     void addParameterField(Part part, const char* key, const QString& label);
-    void applyParameterInput(Part part, const std::string& key, QLineEdit* edit, QLabel* error);
     void selectPart(Part part);
     void refreshStatus();
     void updatePreview();
@@ -52,15 +50,18 @@ private:
     void exportUnavailable();
     void newProject();
     void loadPreviewExample();
+    bool hasUnsavedChanges() const;
+    bool confirmDiscardChanges(const QString& title, const QString& message);
+    void showPreviewFailure(const QString& reason);
     Project project_;
     Part selected_ = Part::Shell;
     QTreeWidget* tree_ = nullptr;
     QWidget* parameterPanel_ = nullptr;
     QFormLayout* form_ = nullptr;
     QLabel* partTitle_ = nullptr;
-    QLabel* designStatus_ = nullptr;
+    QLabel* previewErrorLabel_ = nullptr;
     QLabel* resultStatus_ = nullptr;
     OcctView* view_ = nullptr;
-    QString previewStatus_;
+    QString previewError_;
 };
 }

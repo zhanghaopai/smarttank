@@ -17,6 +17,67 @@ bool sameCalculationBasis(const CalculationBasis& a, const CalculationBasis& b) 
     return std::tie(a.standardEdition, a.addenda, a.material, a.materialSource, a.confirmedChecks)
         == std::tie(b.standardEdition, b.addenda, b.material, b.materialSource, b.confirmedChecks);
 }
+
+void markStale(ResultStamp& stamp) {
+    if (stamp.state != ResultState::Current) return;
+    stamp.state = ResultState::Stale;
+    stamp.reason = "Design inputs changed";
+}
+
+std::optional<std::string> validateLayout(const std::array<LayoutDefinition, 3>& layouts, const std::vector<Plate>& plates) {
+    for (const auto& layout : layouts) {
+        if (!layout.confirmedRule || layout.confirmedRule->empty()) {
+            return std::string("Layout rules are incomplete");
+        }
+    }
+    std::set<std::string> plateIds;
+    std::set<std::string> manufacturingNumbers;
+    if (plates.empty()) {
+        return std::string("No plates generated");
+    }
+    for (const auto& plate : plates) {
+        partIndex(plate.part);
+        if (plate.id.empty() || plate.manufacturingNumber.empty()
+            || !plateIds.insert(plate.id).second || !manufacturingNumbers.insert(plate.manufacturingNumber).second) {
+            return std::string("Plate IDs and manufacturing numbers must be unique and nonempty");
+        }
+    }
+    return std::nullopt;
+}
+
+bool hasText(const std::optional<std::string>& value) {
+    return value && !value->empty();
+}
+
+bool hasCalculationBasis(const CalculationBasis& basis) {
+    // An empty addenda value is allowed; missing addenda is not.
+    return hasText(basis.standardEdition)
+        && basis.addenda.has_value()
+        && hasText(basis.material)
+        && hasText(basis.materialSource)
+        && hasText(basis.confirmedChecks);
+}
+
+std::optional<std::string> validateChecks(const CalculationBasis& basis, const std::vector<CheckResult>& checks) {
+    if (!hasCalculationBasis(basis)) {
+        return std::string("Calculation basis is incomplete");
+    }
+    std::array<bool, 3> coveredParts{};
+    if (checks.empty()) {
+        return std::string("No checks performed");
+    }
+    for (const auto& check : checks) {
+        if (check.check.empty() || check.outcome == CheckResult::Outcome::MissingBasis) {
+            return std::string("Calculation checks are incomplete");
+        }
+        coveredParts[partIndex(check.part)] = true;
+    }
+    if (!coveredParts[0] || !coveredParts[1] || !coveredParts[2]) {
+        return std::string("All three tank parts require check results");
+    }
+    return std::nullopt;
+}
+
 }
 
 const Parameters& Project::parameters(Part part) const {
@@ -39,7 +100,7 @@ bool Project::setParameter(Part part, const std::string& key, std::optional<doub
         if (found != values.end() && found->second == *value) return false;
         values[key] = *value;
     }
-    changed();
+    markInputsChanged();
     return true;
 }
 
@@ -50,48 +111,26 @@ void Project::setLayout(Part part, LayoutDefinition definition) {
     auto& previous = layouts_.at(partIndex(part));
     if (previous.confirmedRule == definition.confirmedRule && previous.inputs == definition.inputs) return;
     previous = std::move(definition);
-    changed();
+    markInputsChanged();
 }
 
 void Project::setBasis(CalculationBasis basis) {
     if (sameCalculationBasis(basis_, basis)) return;
     basis_ = std::move(basis);
-    changed();
+    markInputsChanged();
 }
 
-void Project::changed() {
+void Project::markInputsChanged() {
     ++revision_;
-    if (layoutStamp_.state == ResultState::Current) {
-        layoutStamp_.state = ResultState::Stale;
-        layoutStamp_.reason = "Design inputs changed";
-    }
-    if (calculationStamp_.state == ResultState::Current) {
-        calculationStamp_.state = ResultState::Stale;
-        calculationStamp_.reason = "Design inputs changed";
-    }
+    markStale(layoutStamp_);
+    markStale(calculationStamp_);
 }
 
 bool Project::acceptLayout(std::uint64_t sourceRevision, std::vector<Plate> plates) {
     if (sourceRevision != revision_) return false;
-    for (const auto& layout : layouts_) {
-        if (!layout.confirmedRule || layout.confirmedRule->empty()) {
-            failLayout("Layout rules are incomplete");
-            return false;
-        }
-    }
-    std::set<std::string> plateIds;
-    std::set<std::string> manufacturingNumbers;
-    if (plates.empty()) {
-        failLayout("No plates generated");
+    if (const auto error = validateLayout(layouts_, plates)) {
+        failLayout(*error);
         return false;
-    }
-    for (const auto& plate : plates) {
-        partIndex(plate.part);
-        if (plate.id.empty() || plate.manufacturingNumber.empty()
-            || !plateIds.insert(plate.id).second || !manufacturingNumbers.insert(plate.manufacturingNumber).second) {
-            failLayout("Plate IDs and manufacturing numbers must be unique and nonempty");
-            return false;
-        }
     }
     plates_ = std::move(plates);
     layoutStamp_ = {ResultState::Current, revision_, {}};
@@ -100,27 +139,8 @@ bool Project::acceptLayout(std::uint64_t sourceRevision, std::vector<Plate> plat
 
 bool Project::acceptChecks(std::uint64_t sourceRevision, std::vector<CheckResult> checks) {
     if (sourceRevision != revision_) return false;
-    if (!basis_.standardEdition || basis_.standardEdition->empty()
-        || !basis_.addenda || !basis_.material || basis_.material->empty()
-        || !basis_.materialSource || basis_.materialSource->empty()
-        || !basis_.confirmedChecks || basis_.confirmedChecks->empty()) {
-        failChecks("Calculation basis is incomplete");
-        return false;
-    }
-    std::array<bool, 3> coveredParts{};
-    if (checks.empty()) {
-        failChecks("No checks performed");
-        return false;
-    }
-    for (const auto& check : checks) {
-        if (check.check.empty() || check.outcome == CheckResult::Outcome::MissingBasis) {
-            failChecks("Calculation checks are incomplete");
-            return false;
-        }
-        coveredParts[partIndex(check.part)] = true;
-    }
-    if (!coveredParts[0] || !coveredParts[1] || !coveredParts[2]) {
-        failChecks("All three tank parts require check results");
+    if (const auto error = validateChecks(basis_, checks)) {
+        failChecks(*error);
         return false;
     }
     checks_ = std::move(checks);

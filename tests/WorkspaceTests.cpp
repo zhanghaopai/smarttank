@@ -25,6 +25,23 @@ using namespace smarttank;
 class WorkspaceTests : public QObject {
     Q_OBJECT
 private slots:
+    void replacementActionsProtectUnappliedInput() {
+        MainWindow window;
+        window.show();
+        auto* edit = window.findChild<QLineEdit*>("diameter_mm");
+        edit->setFocus();
+        QTest::keyClicks(edit, "abc");
+        for (const auto* actionName : {"newProjectAction", "previewExampleAction"}) {
+            QTimer::singleShot(0, &window, [&window] {
+                auto* message = window.findChild<QMessageBox*>();
+                QVERIFY(message);
+                message->button(QMessageBox::No)->click();
+            });
+            window.findChild<QAction*>(actionName)->trigger();
+            QCOMPARE(edit->text(), QStringLiteral("abc"));
+            QCOMPARE(window.project().revision(), std::uint64_t(0));
+        }
+    }
     void closingProtectsModifiedAndUnappliedInput() {
         MainWindow window;
         window.show();
