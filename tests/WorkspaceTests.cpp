@@ -13,6 +13,8 @@
 #include <BRepCheck_Analyzer.hxx>
 #include "ui/MainWindow.h"
 #include "view/OcctView.h"
+#include "geometry/InstalledGeometry.h"
+#include "geometry/EnvelopeGeometry.h"
 using namespace smarttank;
 
 class WorkspaceTests : public QObject {

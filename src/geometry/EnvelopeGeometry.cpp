@@ -1,4 +1,4 @@
-#include "view/EnvelopeGeometry.h"
+#include "geometry/EnvelopeGeometry.h"
 #include <BRepPrimAPI_MakeCylinder.hxx>
 #include <BRepPrimAPI_MakeCone.hxx>
 #include <BRepBuilderAPI_MakeEdge.hxx>

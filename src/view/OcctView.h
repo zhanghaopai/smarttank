@@ -8,11 +8,9 @@
 #include <V3d_View.hxx>
 #include <map>
 #include "core/Project.h"
-#include "view/EnvelopeGeometry.h"
+#include "geometry/EnvelopeGeometry.h"
 
 namespace smarttank {
-TopoDS_Shape makeInstalledShape(const InstalledSurface& definition);
-
 class OcctView : public QWidget {
     Q_OBJECT
 public:

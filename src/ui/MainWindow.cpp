@@ -1,5 +1,6 @@
 #include "ui/MainWindow.h"
 #include "view/OcctView.h"
+#include "geometry/EnvelopeGeometry.h"
 #include <QDockWidget>
 #include <QTreeWidget>
 #include <QFormLayout>

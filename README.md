@@ -2,6 +2,8 @@
 
 离线 Windows 储罐设计应用，采用 C++ / Qt Widgets / OCCT。
 
+项目按工程数据（`core`）、几何生成（`geometry`）、三维查看器（`view`）和窗口交互（`ui`）组织。目录职责、依赖边界及架构审查见 [项目结构与架构](docs/05-项目结构与架构.md)。
+
 ## 构建与运行
 
 开发环境准备见 [开发环境文档](docs/03-开发环境.md)。在项目根目录执行：
@@ -10,7 +12,7 @@
 cmake --preset windows-msvc
 cmake --build --preset release
 ctest --preset release
-./tools/run.ps1
+./devops/run.ps1
 ```
 
 ## 当前实现
@@ -20,7 +22,7 @@ ctest --preset release
 
 固定排板、厚度公式、工程保存重开及制造输出尚未实现，等待 OpenSpec 中对应前置条件。
 输入罐体直径和高度可查看罐底与罐壁，输入锥顶升高可查看完整罐体。支持旋转缩放、组件高亮/显隐、等轴测/正视/俯视。
-点击“载入示例尺寸”，或运行 `./tools/run.ps1 -Example`，可查看示例外形。新工程仍不预填任何尺寸或工程依据。
+点击“载入示例尺寸”，或运行 `./devops/run.ps1 -Example`，可查看示例外形。新工程仍不预填任何尺寸或工程依据。
 外形预览不包含板件接缝和制造厚度，不能用于下料或校核；当前没有真实排板可供检查。
 
 若已有窗口打开，可使用独立构建目录：`cmake --preset windows-preview`、`cmake --build --preset preview`、`ctest --preset preview`。

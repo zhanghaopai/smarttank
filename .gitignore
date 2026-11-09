@@ -1,4 +1,7 @@
 /.deps/
 /build/
+/.vscode/
+/.agents/
+/.codex/
 /CMakeUserPresets.json
 /aqtinstall.log
