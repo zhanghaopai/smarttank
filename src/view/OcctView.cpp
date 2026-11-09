@@ -9,7 +9,7 @@
 #include <Aspect_DisplayConnection.hxx>
 #include <OpenGl_GraphicDriver.hxx>
 #include <V3d_Viewer.hxx>
-#include <WNT_Window.hxx>
+#include <Aspect_NeutralWindow.hxx>
 #include <Prs3d_Drawer.hxx>
 #include <Standard_Failure.hxx>
 #include <Image_AlienPixMap.hxx>
@@ -50,7 +50,10 @@ void OcctView::initialize() {
     context_->SetDisplayMode(AIS_Shaded, false);
     view_ = viewer->CreateView();
     view_->ChangeRenderingParams().NbMsaaSamples = 4;
-    occ::handle<WNT_Window> window = new WNT_Window(reinterpret_cast<Aspect_Handle>(winId()));
+    // Qt owns the HWND and its geometry; OCCT needs physical pixel dimensions.
+    occ::handle<Aspect_NeutralWindow> window = new Aspect_NeutralWindow();
+    window->SetNativeHandle(reinterpret_cast<Aspect_Drawable>(winId()));
+    window->SetSize(qRound(width() * devicePixelRatioF()), qRound(height() * devicePixelRatioF()));
     view_->SetWindow(window);
     view_->SetBackgroundColor(Quantity_Color(0.12, 0.15, 0.19, Quantity_TOC_RGB));
     view_->SetProj(V3d_XposYnegZpos);
@@ -76,7 +79,7 @@ void OcctView::showEvent(QShowEvent* event) {
     }
 }
 void OcctView::paintEvent(QPaintEvent*) {
-    if (initialized()) { view_->Redraw(); return; }
+    if (initialized()) { synchronizeViewport(); view_->Redraw(); return; }
     if (!native_) {
         QPainter painter(this);
         painter.fillRect(rect(), QColor(31, 38, 48));
@@ -86,7 +89,15 @@ void OcctView::paintEvent(QPaintEvent*) {
 }
 void OcctView::resizeEvent(QResizeEvent* event) {
     QWidget::resizeEvent(event);
-    if (initialized()) view_->MustBeResized();
+    if (initialized()) { synchronizeViewport(); update(); }
+}
+void OcctView::synchronizeViewport() {
+    if (!initialized()) return;
+    const auto window = occ::handle<Aspect_NeutralWindow>::DownCast(view_->Window());
+    // Recheck at paint time: Qt may deliver resize before updating the native child.
+    // This also covers moving the window between screens with different DPI.
+    if (window->SetSize(qRound(width() * devicePixelRatioF()), qRound(height() * devicePixelRatioF())))
+        view_->MustBeResized();
 }
 void OcctView::showPlates(const std::vector<Plate>& plates) {
     // Validate the complete replacement before changing the current presentation.
@@ -159,6 +170,16 @@ void OcctView::highlightPart(Part part) {
     }
     view_->Redraw();
 }
+void OcctView::rotate(double horizontalRadians, double verticalRadians) {
+    if (!initialized()) return;
+    view_->Rotate(verticalRadians, horizontalRadians, 0.0);
+    view_->Redraw();
+}
+void OcctView::zoom(double factor) {
+    if (!initialized()) return;
+    view_->SetScale(std::clamp(view_->Scale() * factor, 1e-6, 1e6));
+    view_->Redraw();
+}
 std::size_t OcctView::displayedComponentCount() const {
     std::array<bool, 3> seen{};
     for (const auto& part : parts_)
@@ -193,9 +214,7 @@ void OcctView::mouseMoveEvent(QMouseEvent* event) {
 }
 void OcctView::wheelEvent(QWheelEvent* event) {
     if (!initialized()) return;
-    const auto scale = std::clamp(view_->Scale() * std::pow(1.15, event->angleDelta().y() / 120.0), 1e-6, 1e6);
-    view_->SetScale(scale);
-    view_->Redraw();
+    zoom(std::pow(1.15, event->angleDelta().y() / 120.0));
     event->accept();
 }
 bool OcctView::capture(const QString& path) {
@@ -205,6 +224,9 @@ QImage OcctView::snapshot() {
     if (!initialized()) return {};
     Image_AlienPixMap image;
     if (!view_->ToPixMap(image, width(), height())) return {};
+    // Offscreen capture uses logical pixels; restore the on-screen viewport.
+    view_->MustBeResized();
+    update();
     // Avoid dependence on optional OCCT image encoders by using Qt to write PNG.
     const auto buffer = image.Data();
     const auto format = image.Format();

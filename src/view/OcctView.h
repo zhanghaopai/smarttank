@@ -22,6 +22,8 @@ public:
     void showEnvelope(const EnvelopeDimensions& dimensions);
     void clearPlates();
     void fitAll();
+    void rotate(double horizontalRadians, double verticalRadians);
+    void zoom(double factor);
     void highlightPart(Part part);
     std::size_t displayedPlateCount() const { return initialized() && !envelope_ ? pending_.size() : 0; }
     std::size_t displayedComponentCount() const;
@@ -44,6 +46,7 @@ protected:
 
 private:
     void initialize();
+    void synchronizeViewport();
     void displayPending();
     bool native_;
     QString failure_;

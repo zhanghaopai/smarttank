@@ -1,13 +1,15 @@
 #include "ui/MainWindow.h"
 #include "view/OcctView.h"
 #include "geometry/EnvelopeGeometry.h"
-#include <QDockWidget>
+#include <QHBoxLayout>
 #include <QTreeWidget>
 #include <QFormLayout>
 #include <QVBoxLayout>
 #include <QLineEdit>
 #include <QLabel>
-#include <QDoubleValidator>
+#include <QScrollArea>
+#include <QGroupBox>
+#include <QFont>
 #include <QMenuBar>
 #include <QToolBar>
 #include <QStatusBar>
@@ -20,14 +22,6 @@
 
 namespace smarttank {
 namespace {
-class OptionalNumberValidator final : public QDoubleValidator {
-public:
-    using QDoubleValidator::QDoubleValidator;
-    State validate(QString& input, int& position) const override {
-        if (input.trimmed().isEmpty()) return Acceptable;
-        return QDoubleValidator::validate(input, position);
-    }
-};
 QString partName(Part part) {
     switch (part) {
     case Part::Bottom: return QStringLiteral("罐底");
@@ -62,49 +56,80 @@ QString stateName(const ResultStamp& stamp) {
 MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent) {
     setObjectName("mainWindow");
     setWindowTitle(QStringLiteral("SmartTank[*] — 自支撑锥顶储罐"));
-    resize(1200, 760);
+    auto bodyFont = font();
+    if (bodyFont.pointSizeF() < 12.0) bodyFont.setPointSizeF(12.0);
+    setFont(bodyFont);
+    resize(1280, 820);
 
     auto* central = new QWidget(this);
+    central->setObjectName("previewPanel");
     auto* centerLayout = new QVBoxLayout(central);
+    auto* previewTitle = new QLabel(QStringLiteral("储罐外形预览"), central);
+    auto headingFont = font();
+    headingFont.setPointSizeF(font().pointSizeF() * 1.125);
+    headingFont.setWeight(QFont::Medium);
+    previewTitle->setFont(headingFont);
+    centerLayout->addWidget(previewTitle);
     designStatus_ = new QLabel(central);
     designStatus_->setObjectName("designStatus");
     designStatus_->setWordWrap(true);
     centerLayout->addWidget(designStatus_);
     view_ = new OcctView(central);
     centerLayout->addWidget(view_, 1);
+    auto* navigationHelp = new QLabel(QStringLiteral("旋转：左键拖动 / Alt+方向键\n缩放：滚轮 / Ctrl++、Ctrl+- · Ctrl+0 适合窗口"), central);
+    navigationHelp->setWordWrap(true);
+    centerLayout->addWidget(navigationHelp);
     resultStatus_ = new QLabel(central);
     resultStatus_->setObjectName("resultStatus");
     resultStatus_->setWordWrap(true);
     centerLayout->addWidget(resultStatus_);
-    setCentralWidget(central);
-
-    auto* parametersDock = new QDockWidget(QStringLiteral("组件参数"), this);
-    parametersDock->setObjectName("parametersDock");
-    parametersDock->setAllowedAreas(Qt::LeftDockWidgetArea);
-    parameterPanel_ = new QWidget(parametersDock);
+    auto* workspace = new QWidget(this);
+    workspace->setObjectName("workspace");
+    auto* workspaceLayout = new QHBoxLayout(workspace);
+    workspaceLayout->setContentsMargins(0, 0, 0, 0);
+    parameterPanel_ = new QWidget(workspace);
+    parameterPanel_->setObjectName("parametersPanel");
     auto* panelLayout = new QVBoxLayout(parameterPanel_);
     partTitle_ = new QLabel(parameterPanel_);
     partTitle_->setObjectName("partTitle");
+    partTitle_->setFont(headingFont);
     panelLayout->addWidget(partTitle_);
+    auto* inputHelp = new QLabel(QStringLiteral("单位：mm。输入后按 Enter 或移出输入框应用；清空可移除参数。"), parameterPanel_);
+    inputHelp->setWordWrap(true);
+    panelLayout->addWidget(inputHelp);
     form_ = new QFormLayout();
+    form_->setRowWrapPolicy(QFormLayout::WrapLongRows);
+    form_->setFieldGrowthPolicy(QFormLayout::AllNonFixedFieldsGrow);
+    form_->setVerticalSpacing(12);
     panelLayout->addLayout(form_);
-    inputStatus_ = new QLabel(parameterPanel_);
-    inputStatus_->setWordWrap(true);
-    panelLayout->addWidget(inputStatus_);
+    auto* basisGroup = new QGroupBox(QStringLiteral("工程依据"), parameterPanel_);
+    auto* basisLayout = new QVBoxLayout(basisGroup);
     auto* basis = new QLabel(QStringLiteral("标准版次：未确定\n材料：未确定\n排板及制造规则：未确定"), parameterPanel_);
     basis->setObjectName("basisStatus");
     basis->setWordWrap(true);
-    panelLayout->addWidget(basis);
+    basisLayout->addWidget(basis);
+    panelLayout->addWidget(basisGroup);
+    auto* availability = new QLabel(QStringLiteral("当前可编辑参数并预览外形。保存、排板、校核和制造导出暂不可用。"), parameterPanel_);
+    availability->setWordWrap(true);
+    panelLayout->addWidget(availability);
     panelLayout->addStretch();
-    parametersDock->setWidget(parameterPanel_);
-    addDockWidget(Qt::LeftDockWidgetArea, parametersDock);
-
-    auto* componentsDock = new QDockWidget(QStringLiteral("组件树"), this);
-    componentsDock->setObjectName("componentsDock");
-    componentsDock->setAllowedAreas(Qt::RightDockWidgetArea);
-    tree_ = new QTreeWidget(componentsDock);
+    auto* parameterScroll = new QScrollArea(workspace);
+    parameterScroll->setWidgetResizable(true);
+    parameterScroll->setFrameShape(QFrame::NoFrame);
+    parameterScroll->setWidget(parameterPanel_);
+    parameterScroll->setMinimumWidth(280);
+    auto* componentsPanel = new QWidget(workspace);
+    componentsPanel->setObjectName("componentsPanel");
+    auto* componentsLayout = new QVBoxLayout(componentsPanel);
+    auto* componentsTitle = new QLabel(QStringLiteral("组件树"), componentsPanel);
+    componentsTitle->setFont(headingFont);
+    componentsLayout->addWidget(componentsTitle);
+    tree_ = new QTreeWidget(componentsPanel);
     tree_->setObjectName("componentTree");
     tree_->setHeaderHidden(true);
+    tree_->setAccessibleName(QStringLiteral("储罐组件与可见性"));
+    tree_->setToolTip(QStringLiteral("选择组件编辑参数；空格键切换所选组件显隐。"));
+    tree_->setMinimumWidth(fontMetrics().horizontalAdvance(QStringLiteral("自支撑锥顶储罐")) + 64);
     auto* root = new QTreeWidgetItem(tree_, {QStringLiteral("自支撑锥顶储罐")});
     for (const auto part : {Part::Bottom, Part::Shell, Part::Roof}) {
         auto* child = new QTreeWidgetItem(root, {partName(part)});
@@ -112,8 +137,11 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent) {
         child->setCheckState(0, Qt::Checked);
     }
     root->setExpanded(true);
-    componentsDock->setWidget(tree_);
-    addDockWidget(Qt::RightDockWidgetArea, componentsDock);
+    componentsLayout->addWidget(tree_, 1);
+    workspaceLayout->addWidget(parameterScroll, 3);
+    workspaceLayout->addWidget(central, 6);
+    workspaceLayout->addWidget(componentsPanel, 2);
+    setCentralWidget(workspace);
 
     auto* engineeringMenu = menuBar()->addMenu(QStringLiteral("工程"));
     auto* newAction = engineeringMenu->addAction(QStringLiteral("新建工程"));
@@ -141,15 +169,32 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent) {
     connect(exampleAction, &QAction::triggered, this, &MainWindow::loadPreviewExample);
     auto* fitAction = viewMenu->addAction(QStringLiteral("适合窗口"));
     fitAction->setObjectName("fitViewAction");
+    fitAction->setShortcut(QKeySequence(QStringLiteral("Ctrl+0")));
     connect(fitAction, &QAction::triggered, view_, &OcctView::fitAll);
+    int projectionKey = Qt::Key_1;
+    QList<QAction*> projectionActions;
     for (const auto& item : std::vector<std::pair<QString, V3d_TypeOfOrientation>>{
         {QStringLiteral("等轴测"), V3d_XposYnegZpos},
         {QStringLiteral("正视"), V3d_Yneg}, {QStringLiteral("俯视"), V3d_Zpos}}) {
         auto* action = viewMenu->addAction(item.first);
+        action->setShortcut(QKeySequence(Qt::CTRL | projectionKey++));
+        projectionActions.append(action);
         connect(action, &QAction::triggered, this, [this, orientation = item.second] {
             view_->setProjection(orientation);
         });
     }
+    auto* navigationMenu = viewMenu->addMenu(QStringLiteral("旋转与缩放"));
+    const auto addNavigation = [this, navigationMenu](const QString& name, const QString& shortcut, auto operation) {
+        auto* action = navigationMenu->addAction(name);
+        action->setShortcut(QKeySequence(shortcut));
+        connect(action, &QAction::triggered, this, operation);
+    };
+    addNavigation(QStringLiteral("向左旋转"), QStringLiteral("Alt+Left"), [this] { view_->rotate(-0.1, 0); });
+    addNavigation(QStringLiteral("向右旋转"), QStringLiteral("Alt+Right"), [this] { view_->rotate(0.1, 0); });
+    addNavigation(QStringLiteral("向上旋转"), QStringLiteral("Alt+Up"), [this] { view_->rotate(0, -0.1); });
+    addNavigation(QStringLiteral("向下旋转"), QStringLiteral("Alt+Down"), [this] { view_->rotate(0, 0.1); });
+    addNavigation(QStringLiteral("放大"), QStringLiteral("Ctrl++"), [this] { view_->zoom(1.15); });
+    addNavigation(QStringLiteral("缩小"), QStringLiteral("Ctrl+-"), [this] { view_->zoom(1.0 / 1.15); });
     auto* exportMenu = menuBar()->addMenu(QStringLiteral("导出"));
     for (const auto& name : {QStringLiteral("DXF 制造图"), QStringLiteral("CSV 板件明细"), QStringLiteral("计算报告")}) {
         auto* action = exportMenu->addAction(name);
@@ -158,10 +203,11 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent) {
     auto* toolbar = addToolBar(QStringLiteral("工程操作"));
     toolbar->setObjectName("mainToolbar");
     toolbar->addAction(newAction);
-    toolbar->addAction(layoutAction);
-    toolbar->addAction(calculateAction);
-    toolbar->addAction(fitAction);
+    toolbar->setMovable(false);
     toolbar->addAction(exampleAction);
+    toolbar->addSeparator();
+    toolbar->addAction(fitAction);
+    for (auto* action : projectionActions) toolbar->addAction(action);
     connect(tree_, &QTreeWidget::currentItemChanged, this, [this](QTreeWidgetItem* item) {
         if (item && item->data(0, Qt::UserRole).isValid())
             selectPart(static_cast<Part>(item->data(0, Qt::UserRole).toInt()));
@@ -182,33 +228,43 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent) {
 void MainWindow::selectPart(Part part) {
     selected_ = part;
     partTitle_->setText(partName(part));
-    inputStatus_->clear();
     while (form_->rowCount() > 0) form_->removeRow(0);
     for (const auto& field : fields(part)) {
         auto* edit = new QLineEdit(parameterPanel_);
         edit->setObjectName(QString::fromLatin1(field.key));
         edit->setPlaceholderText(QStringLiteral("未输入"));
-        auto* validator = new OptionalNumberValidator(edit);
-        validator->setLocale(QLocale::c());
-        edit->setValidator(validator);
+        edit->setAccessibleName(field.label);
+        edit->setMinimumHeight(fontMetrics().height() + 12);
+        edit->setClearButtonEnabled(true);
+        auto* fieldPanel = new QWidget(parameterPanel_);
+        auto* fieldLayout = new QVBoxLayout(fieldPanel);
+        fieldLayout->setContentsMargins(0, 0, 0, 0);
+        fieldLayout->addWidget(edit);
+        auto* error = new QLabel(fieldPanel);
+        error->setWordWrap(true);
+        error->hide();
+        fieldLayout->addWidget(error);
         const auto& values = project_.parameters(part);
         const auto value = values.find(field.key);
-        if (value != values.end()) edit->setText(QString::number(value->second, 'g', 15));
-        form_->addRow(field.label, edit);
-        connect(edit, &QLineEdit::editingFinished, this, [this, edit, part, key = std::string(field.key)] {
+        if (value != values.end()) edit->setText(locale().toString(value->second, 'g', 15));
+        auto* label = new QLabel(field.label, parameterPanel_);
+        label->setBuddy(edit);
+        form_->addRow(label, fieldPanel);
+        connect(edit, &QLineEdit::editingFinished, this, [this, edit, error, part, key = std::string(field.key)] {
             std::optional<double> value;
             if (!edit->text().trimmed().isEmpty()) {
                 bool ok = false;
-                const auto number = QLocale::c().toDouble(edit->text().trimmed(), &ok);
+                const auto number = locale().toDouble(edit->text().trimmed(), &ok);
                 if (!ok || !std::isfinite(number) || number <= 0) {
-                    inputStatus_->setText(QStringLiteral("请输入大于零的有效数值；本次输入尚未应用。"));
-                    edit->setStyleSheet(QStringLiteral("border: 1px solid #bd3333;"));
+                    error->setText(QStringLiteral("输入错误：请输入大于零的有效数值，或清空。本次输入尚未应用。"));
+                    error->show();
+                    edit->setAccessibleDescription(error->text());
                     return;
                 }
                 value = number;
             }
-            edit->setStyleSheet({});
-            inputStatus_->clear();
+            error->hide();
+            edit->setAccessibleDescription({});
             if (project_.setParameter(part, key, value)) {
                 setWindowModified(true);
                 updatePreview();

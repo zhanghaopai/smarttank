@@ -40,3 +40,5 @@ Bash 入口复用 `run.ps1` 的完整流程，支持 `--example`、`--preview`�
 仅启动已有默认构建用 `./devops/run.ps1 -SkipBuild`；仅构建和测试用 `./devops/run.ps1 -NoLaunch`。这些选项可与 `-Example`、`-Preview` 组合使用。
 
 OCCT 原生查看器已通过 Windows 渲染及旋转缩放测试。操作与当前限制见 [当前版本操作说明](docs/04-当前版本操作说明.md)。
+
+界面审查、优化记录及键盘快捷键见 [界面审查与优化](docs/06-界面审查与优化.md)。

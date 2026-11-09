@@ -33,7 +33,6 @@ private:
     QLabel* partTitle_;
     QLabel* designStatus_;
     QLabel* resultStatus_;
-    QLabel* inputStatus_;
     OcctView* view_;
     QString previewStatus_;
 };

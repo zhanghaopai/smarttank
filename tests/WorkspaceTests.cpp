@@ -8,6 +8,7 @@
 #include <QMouseEvent>
 #include <QWheelEvent>
 #include <QImage>
+#include <QScreen>
 #include <BRepBndLib.hxx>
 #include <Bnd_Box.hxx>
 #include <BRepCheck_Analyzer.hxx>
@@ -20,6 +21,50 @@ using namespace smarttank;
 class WorkspaceTests : public QObject {
     Q_OBJECT
 private slots:
+    void nativeViewportFillsWidgetAfterResizeAndCapture() {
+        if (QGuiApplication::platformName() != "windows") QSKIP("Requires native Windows graphics");
+        MainWindow window;
+        auto& view = *window.view();
+        window.resize(1000, 700);
+        window.show();
+        QVERIFY(QTest::qWaitForWindowExposed(&window));
+        QVERIFY2(view.initialized(), qPrintable(view.failure()));
+        for (const auto size : {QSize(1280, 820), QSize(1100, 760), QSize(1200, 800)}) {
+            window.resize(size);
+            QTest::qWait(100);
+            QVERIFY(!view.snapshot().isNull());
+            QTest::qWait(100);
+            // Read the actual native window, not OCCT's offscreen ToPixMap.
+            const auto image = view.screen()->grabWindow(view.winId()).toImage();
+            QVERIFY(!image.isNull());
+            for (const auto point : {QPoint(8, 8), QPoint(image.width() - 9, 8),
+                                     QPoint(8, image.height() - 9),
+                                     QPoint(image.width() - 9, image.height() - 9)}) {
+                const auto color = image.pixelColor(point);
+                QVERIFY2(color.blue() > color.red() && color.blue() > color.green(),
+                         "Native viewport does not cover all widget corners");
+            }
+        }
+    }
+    void invalidInputReportsErrorAndPreservesAppliedValue() {
+        MainWindow window;
+        window.show();
+        auto* diameter = window.findChild<QLineEdit*>("diameter_mm");
+        diameter->setText(QStringLiteral("2000"));
+        QTest::keyClick(diameter, Qt::Key_Return);
+        const auto revision = window.project().revision();
+        for (const auto& input : {QStringLiteral("-1"), QStringLiteral("abc"), QStringLiteral("0")}) {
+            diameter->setText(input);
+            QTest::keyClick(diameter, Qt::Key_Return);
+            QCOMPARE(window.project().revision(), revision);
+            QCOMPARE(window.project().parameters(Part::Shell).at("diameter_mm"), 2000.0);
+            QVERIFY(!diameter->accessibleDescription().isEmpty());
+        }
+        diameter->setText(window.locale().toString(2500.5, 'f', 1));
+        QTest::keyClick(diameter, Qt::Key_Return);
+        QCOMPARE(window.project().parameters(Part::Shell).at("diameter_mm"), 2500.5);
+        QVERIFY(diameter->accessibleDescription().isEmpty());
+    }
     void componentParametersAndViewDoNotChangeInputs() {
         MainWindow window;
         window.show();
@@ -27,8 +72,9 @@ private slots:
         QVERIFY(tree);
         QCOMPARE(tree->topLevelItemCount(), 1);
         QCOMPARE(tree->topLevelItem(0)->childCount(), 3);
-        QCOMPARE(window.dockWidgetArea(window.findChild<QDockWidget*>("parametersDock")), Qt::LeftDockWidgetArea);
-        QCOMPARE(window.dockWidgetArea(window.findChild<QDockWidget*>("componentsDock")), Qt::RightDockWidgetArea);
+        QVERIFY(window.findChildren<QDockWidget*>().isEmpty());
+        QVERIFY(window.centralWidget()->isAncestorOf(tree));
+        QVERIFY(window.centralWidget()->isAncestorOf(window.view()));
         auto* diameter = window.findChild<QLineEdit*>("diameter_mm");
         QVERIFY(diameter && diameter->text().isEmpty());
         QTest::keyClicks(diameter, "2000");
@@ -43,7 +89,7 @@ private slots:
         window.view()->highlightPart(Part::Roof);
         QCOMPARE(window.project().revision(), revision);
         tree->setCurrentItem(tree->topLevelItem(0)->child(1));
-        QCOMPARE(window.findChild<QLineEdit*>("diameter_mm")->text(), QStringLiteral("2000"));
+        QCOMPARE(window.findChild<QLineEdit*>("diameter_mm")->text(), window.locale().toString(2000.0, 'g', 15));
         diameter = window.findChild<QLineEdit*>("diameter_mm");
         diameter->clear();
         QTest::keyClick(diameter, Qt::Key_Return);
@@ -123,6 +169,10 @@ private slots:
         QCoreApplication::sendEvent(&view, &wheel);
         QVERIFY(view.capture(afterPath));
         QVERIFY(QImage(beforePath) != QImage(afterPath));
+        const auto beforeKeyboardNavigation = view.snapshot();
+        view.rotate(0.1, -0.1);
+        view.zoom(1.15);
+        QVERIFY(view.snapshot() != beforeKeyboardNavigation);
         for (const auto& plate : plates)
             QCOMPARE(plate.manufacturingDimensions.at("synthetic_dimension"), 123.0);
         view.clearPlates();
